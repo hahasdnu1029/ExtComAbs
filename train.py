@@ -32,10 +32,14 @@ from module.embedding import Word_Embedding
 from module.vocabulary import Vocab
 from tools.logger import *
 
-_DEBUG_FLAG_ = False
 
 
 def save_model(model, save_file):
+    """save model use torch.save()
+    :param model:
+    :param save_file:
+    :return:
+    """
     with open(save_file, 'wb') as f:
         torch.save(model.state_dict(), f)
     logger.info('[INFO] Saving model to %s', save_file)
@@ -48,11 +52,12 @@ def setup_training(model, train_loader, valid_loader, valset, args):
         :param train_loader: train dataset loader
         :param valid_loader: valid dataset loader
         :param valset: valid dataset which includes text and summary
-        :param hps: hps for model
+        :param args: args for model
         :return:
     """
 
     train_dir = os.path.join(args.save_root, "train")
+
     if os.path.exists(train_dir) and args.restore_model != 'None':
         logger.info("[INFO] Restoring %s for training...", args.restore_model)
         bestmodel_file = os.path.join(train_dir, args.restore_model)
@@ -98,12 +103,11 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
         train_loss = 0.0
         epoch_start_time = time.time()
         for i, batch in enumerate(train_loader):
-            iter_start_time = time.time()
             model.train()
+            iter_start_time = time.time()
             features_in = batch[0]
             features_out = batch[1]
             labels = batch[2]
-            indexs = batch[3]
             if args.cuda:
                 features_in.to(torch.device("cuda"))
                 features_out.to(torch.device("cuda"))
@@ -116,17 +120,11 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
                     else:
                         loss.add_(criterion(outputs[j][k], features_out[j]))
             loss = loss / (args.batch_size * args.sent_max_len)
-            if not (np.isfinite(loss.data.cpu())).numpy():
-                logger.error("train Loss is not finite. Stopping.")
-                logger.info(loss)
-                for name, param in model.named_parameters():
-                    if param.requires_grad:
-                        logger.info(name)
-                        # logger.info(param.grad.data.sum())
-                raise Exception("train Loss is not finite. Stopping.")
 
             optimizer.zero_grad()
+
             loss.backward()
+
             if args.grad_clip:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
@@ -135,26 +133,25 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             train_loss += float(loss.data)
             epoch_loss += float(loss.data)
 
+            # 每100个batch打印输出一下loss
             if i % 100 == 0:
-                if _DEBUG_FLAG_:
-                    for name, param in model.named_parameters():
-                        if param.requires_grad:
-                            logger.debug(name)
-                            logger.debug(param.grad.data.sum())
                 logger.info('       | end of iter {:3d} | time: {:5.2f}s | train loss {:5.4f} | '
                                 .format(i, (time.time() - iter_start_time),float(train_loss / 100)))
                 train_loss = 0.0
 
+        # 随epoch增大，学习虑逐渐降低
         if args.lr_descent:
             new_lr = max(5e-6, args.lr / (epoch + 1))
             for param_group in list(optimizer.param_groups):
                 param_group['lr'] = new_lr
             logger.info("[INFO] The learning rate now is %f", new_lr)
-
+        # 每个epoch的平均loss
         epoch_avg_loss = epoch_loss / len(train_loader)
         logger.info('   | end of epoch {:3d} | time: {:5.2f}s | epoch train loss {:5.4f} | '
                     .format(epoch, (time.time() - epoch_start_time), float(epoch_avg_loss)))
 
+        # epoch_avg_loss<best_train_loss save新的model，并吧best_train_loss=epoch_avg_loss
+        # epoch_avg_loss>=best_train_loss earlystop（loss未下降，停止训练）
         if not best_train_loss or epoch_avg_loss < best_train_loss:
             save_file = os.path.join(train_dir, "bestmodel")
             logger.info('[INFO] Found new best model with %.3f running_train_loss. Saving to %s', float(epoch_avg_loss),
@@ -166,8 +163,10 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             save_model(model, os.path.join(train_dir, "earlystop"))
             sys.exit(1)
 
-        # best_loss, best_F, non_descent_cnt, saveNo = run_eval(model, valid_loader, valset, args, best_loss, best_F, non_descent_cnt, saveNo)
+        # 每个epoch结束对模型进行评估，best_loss,best_F,non_descent_cnt,saveNo
+        best_loss, best_F, non_descent_cnt, saveNo = run_eval(model, valid_loader, valset, args, best_loss, best_F, non_descent_cnt, saveNo)
 
+        # model评估连续3次未下降停止训练
         if non_descent_cnt >= 3:
             logger.error("[Error] val loss does not descent for three times. Stopping supervisor...")
             save_model(model, os.path.join(train_dir, "earlystop"))
@@ -197,10 +196,15 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
 
     with torch.no_grad():
         tester = SLTester(model, args.m)
-        for i, (example,index) in enumerate(loader):
+        for i, batch in enumerate(loader):
+            features_in = batch[0]
+            features_out = batch[1]
+            label = batch[2]
+            index = batch[3]
             if args.cuda:
-                example.to(torch.device("cuda"))
-            tester.evaluation(example, valset)
+                features_in.to(torch.device("cuda"))
+                features_out.to(torch.device("cuda"))
+            tester.evaluation(features_in, features_out, label, index, valset)
 
     running_avg_loss = tester.running_avg_loss
 
@@ -217,9 +221,11 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
     scores_all['rouge-2']['p'], scores_all['rouge-2']['r'], scores_all['rouge-2']['f']) \
           + "Rougel:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (
     scores_all['rouge-l']['p'], scores_all['rouge-l']['r'], scores_all['rouge-l']['f'])
+
     logger.info(res)
 
     tester.getMetric()
+
     F = tester.labelMetric
 
     if best_loss is None or running_avg_loss < best_loss:
@@ -327,7 +333,8 @@ def main():
     vocab = Vocab(VOCAL_FILE, args.vocab_size)
     embed = torch.nn.Embedding(vocab.size(), args.word_emb_dim, padding_idx=0)
     # 加载预训练的Embedding权重
-    if args.word_embedding:
+    # if args.word_embedding:
+    if False:
         embed_loader = Word_Embedding(args.embedding_path, vocab)
         vectors = embed_loader.load_my_vecs(args.word_emb_dim)
         pretrained_weight = embed_loader.add_unknown_words_by_avg(vectors, args.word_emb_dim)

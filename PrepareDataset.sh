@@ -17,7 +17,7 @@ type=(train val test)
 
 echo -e "\033[34m[Shell] Create Vocabulary! \033[0m"
 
-python script/createVoc.py --dataset $dataset --data_path $datadir/train.label.jsonl
+python ./createVoc.py --dataset $dataset --data_path $datadir/train.label.jsonl
 
 echo -e "\033[34m[Shell] The preprocess of dataset $dataset has finished! \033[0m"
 
