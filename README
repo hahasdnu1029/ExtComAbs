@@ -1,0 +1,6 @@
+# ExtComAbs
+
+* 2020-9-15
+  * commitid:b0281f63941472dd7965cbec62ec6f1574d894ed  
+  * 执行脚本:./PrepareDataset --dataset --datadir (--dataset:dataset name,--datadi:dataset path)  
+  * 结果:创建词表    
