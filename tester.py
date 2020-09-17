@@ -121,10 +121,11 @@ class SLTester(TestPipLine):
         for j in range(len(outputs)):
             idx = index[j]
             example = dataset.get_example(idx)
+            sent_max_number = example.doc_max_timesteps
             original_article_sents = example.original_article_sents
-            sent_max_number = len(original_article_sents)
             refer = example.original_abstract
-            N =0
+
+            N =0 # 预测label==1是数目
             for i in range(len(outputs[j])):
                 if outputs[j][i] == 1:
                     N +=1
@@ -133,13 +134,14 @@ class SLTester(TestPipLine):
                 pred_idx = torch.arange(N)[prediction != 0].long()
             else:
                 if blocking:
-                    pred_idx = self.ngram_blocking(original_article_sents, outputs[j][:, 1], self.blocking_win,
+                    pred_idx = self.ngram_blocking(original_article_sents[:sent_max_number], outputs[j][:, 1], self.blocking_win,
                                                    min(self.m, N))
                 else:
                     # print(p_sent.size())
                     topk, pred_idx = torch.topk(outputs[j][:, 1], min(self.m, N))
                 prediction = torch.zeros(N).long()
                 prediction[pred_idx] = 1
+
             self.extracts.append(pred_idx.tolist())
 
             self.pred += prediction.sum()
@@ -149,6 +151,7 @@ class SLTester(TestPipLine):
             self.match += (prediction == label).sum()
             self.total_sentence_num += N
             self.example_num += 1
+
             hyps = "\n".join(original_article_sents[id] for id in pred_idx if id < sent_max_number)
 
             self._hyps.append(hyps)

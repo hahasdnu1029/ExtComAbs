@@ -36,6 +36,7 @@ class Example(object):
         """
 
         self.sent_max_len = sent_max_len
+        self.doc_max_timesteps = doc_max_timesteps
         self.enc_sent_len = []
         self.enc_sent_input = []
         self.enc_sent_input_pad = []
@@ -64,9 +65,9 @@ class Example(object):
             self.enc_sent_input_pad_together.extend(self.enc_sent_input_pad[i])
 
         # Store the label
-        self.label = [0 for i in range(sent_max_len)]
+        self.label = [0 for i in range(doc_max_timesteps)]
         for i in label:
-            if(i < sent_max_len):
+            if(i < doc_max_timesteps):
                 self.label[i] = 1
 
     def _pad_encoder_input(self, pad_id):

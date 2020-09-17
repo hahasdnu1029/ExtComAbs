@@ -22,7 +22,6 @@ import os
 import shutil
 import time
 
-import numpy as np
 import torch
 from model import MyModel
 from tester import SLTester
@@ -102,24 +101,24 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
         epoch_loss = 0.0
         train_loss = 0.0
         epoch_start_time = time.time()
-        for i, batch in enumerate(train_loader):
+        for i, (features_in,features_out,labels,indexs) in enumerate(train_loader):
             model.train()
+
             iter_start_time = time.time()
-            features_in = batch[0]
-            features_out = batch[1]
-            labels = batch[2]
+
             if args.cuda:
-                features_in.to(torch.device("cuda"))
-                features_out.to(torch.device("cuda"))
-                labels.to(torch.device("cuda"))
-            outputs = model(features_in,features_out)
+                features_in = features_in.to(torch.device("cuda"))
+                features_out =features_out.to(torch.device("cuda"))
+                labels = labels.to(torch.device("cuda"))
+                indexs = indexs.to(torch.device("cuda"))
+
+            outputs = model(features_in, features_out)
             for j in range(len(outputs)):
-                for k in range(len(outputs[j])):
-                    if j == 0 and k == 0:
-                        loss = criterion(outputs[j][k], features_out[j])
-                    else:
-                        loss.add_(criterion(outputs[j][k], features_out[j]))
-            loss = loss / (args.batch_size * args.sent_max_len)
+                if j == 0:
+                    loss = criterion(outputs[j], labels[j])
+                else:
+                    loss.add_(criterion(outputs[j], labels[j]))
+            loss = loss / args.batch_size
 
             optimizer.zero_grad()
 
@@ -201,9 +200,8 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
             features_out = batch[1]
             label = batch[2]
             index = batch[3]
-            if args.cuda:
-                features_in.to(torch.device("cuda"))
-                features_out.to(torch.device("cuda"))
+            if(args.cuda):
+                label.to(torch.device("cuda"))
             tester.evaluation(features_in, features_out, label, index, valset)
 
     running_avg_loss = tester.running_avg_loss
@@ -281,7 +279,7 @@ def main():
     parser.add_argument('--n_epochs', type=int, default=20, help='Number of epochs [default: 20]')
     parser.add_argument('--batch_size', type=int, default=2, help='Mini batch size [default: 32]')
     parser.add_argument('--word_embedding', action='store_true', default=True, help='whether to use Word embedding [default: True]')
-    parser.add_argument('--word_emb_dim', type=int, default=4, help='Word embedding size [default: 300]')
+    parser.add_argument('--word_emb_dim', type=int, default=2, help='Word embedding size [default: 300]')
     parser.add_argument('--embed_train', action='store_true', default=False,help='whether to train Word embedding [default: False]')
     parser.add_argument('--feat_embed_size', type=int, default=50, help='feature embedding size [default: 50]')
     parser.add_argument('--n_layers', type=int, default=1, help='Number of GAT layers [default: 1]')
@@ -349,14 +347,14 @@ def main():
     logger.info("[MODEL] ExtComAbs ")
 
     dataset = ExampleSet(DATA_FILE, vocab, args.doc_max_timesteps, args.sent_max_len)
-    train_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=32)
+    train_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1)
     del dataset
 
     valid_dataset = ExampleSet(VALID_FILE, vocab, args.doc_max_timesteps, args.sent_max_len)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=32)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
     if args.cuda:
-        model.to(torch.device("cuda:0"))
+        model.to(torch.device("cuda"))
         logger.info("[INFO] Use cuda")
 
     setup_training(model, train_loader, valid_loader, valid_dataset, args)
