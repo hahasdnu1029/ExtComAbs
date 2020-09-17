@@ -1,6 +1,11 @@
 # ExtComAbs
 
 * 2020-9-15
-  * commitid:b0281f63941472dd7965cbec62ec6f1574d894ed  
+  * commitid:之前仓库追踪的有问题，覆盖了
   * 执行脚本:./PrepareDataset --dataset --datadir (--dataset:dataset name,--datadi:dataset path)  
-  * 结果:创建词表    
+  * 结果:创建词表
+
+* 2020-9-17
+  * commitid:edf7c8fb2b8ceea959a4214a35b529290b7187a3
+  * 执行脚本:python train.py --cuda --gpu 0 --data_dir <data dir of your json-format dataset> --cache_dir <cache directory of vocab>  --save_root <model path> --log_root <log path> --lr_descent --grad_clip -m 3
+  * 结果:Transformer通过句子生成文档的task添加进去了，可以正常train起来了
