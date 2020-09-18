@@ -68,7 +68,8 @@ def setup_training(model, train_loader, valid_loader, valset, args):
         os.makedirs(train_dir)
 
     try:
-        run_training(model, train_loader, valid_loader, valset, args, train_dir)
+        run_eval(model, valid_loader, valset, args, 0, 0, 0, 0)
+        # run_training(model, train_loader, valid_loader, valset, args, train_dir)
     except KeyboardInterrupt:
         logger.error("[Error] Caught keyboard interrupt on worker. Stopping supervisor...")
         save_model(model, os.path.join(train_dir, "earlystop"))
@@ -195,14 +196,11 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
 
     with torch.no_grad():
         tester = SLTester(model, args.m)
-        for i, batch in enumerate(loader):
-            features_in = batch[0]
-            features_out = batch[1]
-            label = batch[2]
-            index = batch[3]
+        for i, (features_in, features_out, labels, indexs) in enumerate(loader):
             if(args.cuda):
-                label.to(torch.device("cuda"))
-            tester.evaluation(features_in, features_out, label, index, valset)
+                features_in = features_in.to(torch.device("cuda"))
+                features_out = features_out.to(torch.device("cuda"))
+            tester.evaluation(features_in, features_out, labels, indexs, valset)
 
     running_avg_loss = tester.running_avg_loss
 
@@ -294,8 +292,8 @@ def main():
     parser.add_argument('--atten_dropout_prob', type=float, default=0.1, help='attention dropout prob [default: 0.1]')
     parser.add_argument('--ffn_dropout_prob', type=float, default=0.1,help='PositionwiseFeedForward dropout prob [default: 0.1]')
     parser.add_argument('--use_orthnormal_init', action='store_true', default=True,help='use orthnormal init for lstm [default: True]')
-    parser.add_argument('--sent_max_len', type=int, default=5,help='max length of sentences (max source text sentence tokens)')
-    parser.add_argument('--doc_max_timesteps', type=int, default=50,help='max length of documents (max timesteps of documents)')
+    parser.add_argument('--sent_max_len', type=int, default=2,help='max length of sentences (max source text sentence tokens)')
+    parser.add_argument('--doc_max_timesteps', type=int, default=3,help='max length of documents (max timesteps of documents)')
 
     # Training
     parser.add_argument('--lr', type=float, default=0.0005, help='learning rate')
@@ -356,7 +354,6 @@ def main():
     if args.cuda:
         model.to(torch.device("cuda"))
         logger.info("[INFO] Use cuda")
-
     setup_training(model, train_loader, valid_loader, valid_dataset, args)
 
 if __name__ == '__main__':

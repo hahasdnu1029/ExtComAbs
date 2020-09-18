@@ -18,7 +18,7 @@
 
 
 import torch
-
+import torch.nn.functional as F
 import os
 from tools.utils import eval_label
 from tools.logger import *
@@ -101,55 +101,59 @@ class SLTester(TestPipLine):
         super().__init__(model, m, test_dir, limited)
         self.pred, self.true, self.match, self.match_true = 0, 0, 0, 0
         self._F = 0
-        self.criterion = torch.nn.CrossEntropyLoss(reduction='none')
+        self.criterion = torch.nn.CrossEntropyLoss()
         self.blocking_win = blocking_win
 
-    def evaluation(self, features_in, features_out, label, index, dataset, blocking=False):
+    def evaluation(self, features_in, features_out, labels, indexs, dataset, blocking=False):
         """
 
         :param features_in:
         :param features_out:
+        :param label:
+        :param index:
         :param dataset:
         :param blocking:
         :return:
         """
         self.batch_number += 1
-        outputs = self.model.forward(features_in,features_out)
-        loss = self.criterion(outputs, label)
+        outputs = self.model.forward(features_in, features_out)
+        for j in range(len(outputs)):
+            if j == 0:
+                loss = self.criterion(outputs[j], labels[j])
+            else:
+                loss.add_(self.criterion(outputs[j], labels[j]))
+        loss = loss / len(outputs)
+
         self.running_loss += float(loss.data)
 
         for j in range(len(outputs)):
-            idx = index[j]
+            labels[j] = labels[j].to(torch.device("cpu"))
+            idx = indexs[j]
             example = dataset.get_example(idx)
             sent_max_number = example.doc_max_timesteps
             original_article_sents = example.original_article_sents
             refer = example.original_abstract
 
-            N =0 # 预测label==1是数目
-            for i in range(len(outputs[j])):
-                if outputs[j][i] == 1:
-                    N +=1
-            if self.m == 0:
-                prediction = outputs[j].max(1)[1]
-                pred_idx = torch.arange(N)[prediction != 0].long()
+            softmax_value = F.softmax(outputs[j], dim=1).max(dim=1)[1]
+
+
+            if blocking:
+                pred_idx = self.ngram_blocking(original_article_sents[:sent_max_number], softmax_value[j], self.blocking_win,
+                                               min(self.m, sent_max_number))
             else:
-                if blocking:
-                    pred_idx = self.ngram_blocking(original_article_sents[:sent_max_number], outputs[j][:, 1], self.blocking_win,
-                                                   min(self.m, N))
-                else:
-                    # print(p_sent.size())
-                    topk, pred_idx = torch.topk(outputs[j][:, 1], min(self.m, N))
-                prediction = torch.zeros(N).long()
-                prediction[pred_idx] = 1
+                topk, pred_idx = torch.topk(softmax_value, min(self.m, sent_max_number))
+
+            prediction = torch.zeros(sent_max_number).long()
+            prediction[pred_idx] = 1
 
             self.extracts.append(pred_idx.tolist())
 
             self.pred += prediction.sum()
-            self.true += label.sum()
+            self.true += labels.sum()
 
-            self.match_true += ((prediction == label) & (prediction == 1)).sum()
-            self.match += (prediction == label).sum()
-            self.total_sentence_num += N
+            self.match_true += ((prediction == labels[j]) & (prediction == 1)).sum()
+            self.match += (prediction == labels[j]).sum()
+            self.total_sentence_num += sent_max_number
             self.example_num += 1
 
             hyps = "\n".join(original_article_sents[id] for id in pred_idx if id < sent_max_number)
