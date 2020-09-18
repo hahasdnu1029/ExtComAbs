@@ -1,6 +1,0 @@
-./.gitignore
-./cache/*
-./datasets/*
-./Glove/*
-./log/*
-./save/*
