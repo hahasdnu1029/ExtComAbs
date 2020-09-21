@@ -32,7 +32,6 @@ from module.vocabulary import Vocab
 from tools.logger import *
 
 
-
 def save_model(model, save_file):
     """save model use torch.save()
     :param model:
@@ -56,7 +55,6 @@ def setup_training(model, train_loader, valid_loader, valset, args):
     """
 
     train_dir = os.path.join(args.save_root, "train")
-
     if os.path.exists(train_dir) and args.restore_model != 'None':
         logger.info("[INFO] Restoring %s for training...", args.restore_model)
         bestmodel_file = os.path.join(train_dir, args.restore_model)
@@ -64,19 +62,20 @@ def setup_training(model, train_loader, valid_loader, valset, args):
         args.save_root = args.save_root + "_reload"
     else:
         logger.info("[INFO] Create new model for training...")
-        if os.path.exists(train_dir): shutil.rmtree(train_dir)
+        if os.path.exists(train_dir):
+            shutil.rmtree(train_dir)
         os.makedirs(train_dir)
 
     try:
-        run_eval(model, valid_loader, valset, args, 0, 0, 0, 0)
-        # run_training(model, train_loader, valid_loader, valset, args, train_dir)
+        # run_eval(model, valid_loader, valset, args, 0, 0, 0, 0)
+        run_training(model, train_loader, valid_loader, valset, args, train_dir)
     except KeyboardInterrupt:
         logger.error("[Error] Caught keyboard interrupt on worker. Stopping supervisor...")
         save_model(model, os.path.join(train_dir, "earlystop"))
 
 
 def run_training(model, train_loader, valid_loader, valset, args, train_dir):
-    '''  Repeatedly runs training iterations, logging loss to screen and log files
+    """  Repeatedly runs training iterations, logging loss to screen and log files
     
         :param model: the model
         :param train_loader: train dataset loader
@@ -85,7 +84,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
         :param args: args for model
         :param train_dir: where to save checkpoints
         :return: 
-    '''
+    """
     logger.info("[INFO] Starting run_training")
 
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
@@ -94,24 +93,23 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
 
     best_train_loss = None
     best_loss = None
-    best_F = None
+    best_f = None
     non_descent_cnt = 0
-    saveNo = 0
+    save_no = 0
 
     for epoch in range(1, args.n_epochs + 1):
+        epoch_start_time = time.time()
         epoch_loss = 0.0
         train_loss = 0.0
-        epoch_start_time = time.time()
-        for i, (features_in,features_out,labels,indexs) in enumerate(train_loader):
+        for i, (features_in, features_out, labels, indexs) in enumerate(train_loader):
             model.train()
 
             iter_start_time = time.time()
 
             if args.cuda:
                 features_in = features_in.to(torch.device("cuda"))
-                features_out =features_out.to(torch.device("cuda"))
+                features_out = features_out.to(torch.device("cuda"))
                 labels = labels.to(torch.device("cuda"))
-                indexs = indexs.to(torch.device("cuda"))
 
             outputs = model(features_in, features_out)
             for j in range(len(outputs)):
@@ -134,7 +132,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             epoch_loss += float(loss.data)
 
             # 每100个batch打印输出一下loss
-            if i % 100 == 0:
+            if i != 0 and i % 100 == 0:
                 logger.info('       | end of iter {:3d} | time: {:5.2f}s | train loss {:5.4f} | '
                                 .format(i, (time.time() - iter_start_time),float(train_loss / 100)))
                 train_loss = 0.0
@@ -164,7 +162,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             sys.exit(1)
 
         # 每个epoch结束对模型进行评估，best_loss,best_F,non_descent_cnt,saveNo
-        best_loss, best_F, non_descent_cnt, saveNo = run_eval(model, valid_loader, valset, args, best_loss, best_F, non_descent_cnt, saveNo)
+        best_loss, best_f, non_descent_cnt, save_no = run_eval(model, valid_loader, valset, args, best_loss, best_f, non_descent_cnt, save_no)
 
         # model评估连续3次未下降停止训练
         if non_descent_cnt >= 3:
@@ -173,7 +171,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             return
 
 
-def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, saveNo):
+def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, save_no):
     ''' 
         Repeatedly runs eval iterations, logging to screen and writing summaries. Saves the model with the best loss seen so far.
         :param model: the model
@@ -200,7 +198,8 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
             if(args.cuda):
                 features_in = features_in.to(torch.device("cuda"))
                 features_out = features_out.to(torch.device("cuda"))
-            tester.evaluation(features_in, features_out, labels, indexs, valset)
+                labels = labels.to(torch.device("cuda"))
+            tester.evaluation(features_in, features_out, labels, indexs, valset, True)
 
     running_avg_loss = tester.running_avg_loss
 
@@ -211,12 +210,9 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
     scores_all = rouge.get_scores(tester.hyps, tester.refer, avg=True)
     logger.info('[INFO] End of valid | time: {:5.2f}s | valid loss {:5.4f} | ' .format((time.time() - iter_start_time), float(running_avg_loss)))
 
-    res = "Rouge1:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (
-    scores_all['rouge-1']['p'], scores_all['rouge-1']['r'], scores_all['rouge-1']['f']) \
-          + "Rouge2:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (
-    scores_all['rouge-2']['p'], scores_all['rouge-2']['r'], scores_all['rouge-2']['f']) \
-          + "Rougel:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (
-    scores_all['rouge-l']['p'], scores_all['rouge-l']['r'], scores_all['rouge-l']['f'])
+    res = "Rouge1:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-1']['p'], scores_all['rouge-1']['r'], scores_all['rouge-1']['f']) \
+          + "Rouge2:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-2']['p'], scores_all['rouge-2']['r'], scores_all['rouge-2']['f']) \
+          + "Rougel:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-l']['p'], scores_all['rouge-l']['r'], scores_all['rouge-l']['f'])
 
     logger.info(res)
 
@@ -225,7 +221,7 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
     F = tester.labelMetric
 
     if best_loss is None or running_avg_loss < best_loss:
-        bestmodel_save_path = os.path.join(eval_dir, 'bestmodel_%d' % (saveNo % 3))  # this is where checkpoints of best models are saved
+        bestmodel_save_path = os.path.join(eval_dir, 'bestmodel_%d' % (save_no % 3))  # this is where checkpoints of best models are saved
         if best_loss is not None:
             logger.info(
                 '[INFO] Found new best model with %.6f running_avg_loss. The original loss is %.6f, Saving to %s',
@@ -238,23 +234,23 @@ def run_eval(model, loader, valset, args, best_loss, best_F, non_descent_cnt, sa
             torch.save(model.state_dict(), f)
         best_loss = running_avg_loss
         non_descent_cnt = 0
-        saveNo += 1
+        save_no += 1
     else:
         non_descent_cnt += 1
 
-    if best_F is None or best_F < F:
+    if best_f is None or best_f < F:
         bestmodel_save_path = os.path.join(eval_dir, 'bestFmodel')  # this is where checkpoints of best models are saved
-        if best_F is not None:
+        if best_f is not None:
             logger.info('[INFO] Found new best model with %.6f F. The original F is %.6f, Saving to %s', float(F),
-                        float(best_F), bestmodel_save_path)
+                        float(best_f), bestmodel_save_path)
         else:
             logger.info('[INFO] Found new best model with %.6f F. The original F is None, Saving to %s', float(F),
                         bestmodel_save_path)
         with open(bestmodel_save_path, 'wb') as f:
             torch.save(model.state_dict(), f)
-        best_F = F
+        best_f = F
 
-    return best_loss, best_F, non_descent_cnt, saveNo
+    return best_loss, best_f, non_descent_cnt, save_no
 
 
 def main():
@@ -275,32 +271,19 @@ def main():
     parser.add_argument('--cuda', action='store_true', default=False, help='GPU or CPU [default: False]')
     parser.add_argument('--vocab_size', type=int, default=1000,help='Size of vocabulary. [default: 50000]')
     parser.add_argument('--n_epochs', type=int, default=20, help='Number of epochs [default: 20]')
-    parser.add_argument('--batch_size', type=int, default=2, help='Mini batch size [default: 32]')
+    parser.add_argument('--batch_size', type=int, default=1, help='Mini batch size [default: 32]')
     parser.add_argument('--word_embedding', action='store_true', default=True, help='whether to use Word embedding [default: True]')
-    parser.add_argument('--word_emb_dim', type=int, default=2, help='Word embedding size [default: 300]')
+    parser.add_argument('--word_emb_dim', type=int, default=256, help='Word embedding size [default: 256],Glove dim is 300')
     parser.add_argument('--embed_train', action='store_true', default=False,help='whether to train Word embedding [default: False]')
-    parser.add_argument('--feat_embed_size', type=int, default=50, help='feature embedding size [default: 50]')
-    parser.add_argument('--n_layers', type=int, default=1, help='Number of GAT layers [default: 1]')
-    parser.add_argument('--lstm_hidden_state', type=int, default=128, help='size of lstm hidden state [default: 128]')
-    parser.add_argument('--lstm_layers', type=int, default=2, help='Number of lstm layers [default: 2]')
-    parser.add_argument('--bidirectional', action='store_true', default=True, help='whether to use bidirectional LSTM [default: True]')
-    parser.add_argument('--n_feature_size', type=int, default=128, help='size of node feature [default: 128]')
-    # parser.add_argument('--hidden_size', type=int, default=4, help='hidden size [default: 64]')
-    parser.add_argument('--ffn_inner_hidden_size', type=int, default=512,help='PositionwiseFeedForward inner hidden size [default: 512]')
-    parser.add_argument('--n_head', type=int, default=2, help='multihead attention number [default: 8]')
-    parser.add_argument('--recurrent_dropout_prob', type=float, default=0.1,help='recurrent dropout prob [default: 0.1]')
-    parser.add_argument('--atten_dropout_prob', type=float, default=0.1, help='attention dropout prob [default: 0.1]')
-    parser.add_argument('--ffn_dropout_prob', type=float, default=0.1,help='PositionwiseFeedForward dropout prob [default: 0.1]')
-    parser.add_argument('--use_orthnormal_init', action='store_true', default=True,help='use orthnormal init for lstm [default: True]')
-    parser.add_argument('--sent_max_len', type=int, default=2,help='max length of sentences (max source text sentence tokens)')
-    parser.add_argument('--doc_max_timesteps', type=int, default=3,help='max length of documents (max timesteps of documents)')
+    parser.add_argument('--n_head', type=int, default=1, help='multihead attention number [default: 8]')
+    parser.add_argument('--sent_max_len', type=int, default=2,help='max length of sentences (max source text sentence tokens)[default:100]')
+    parser.add_argument('--doc_max_timesteps', type=int, default=3,help='max length of documents (max timesteps of documents)[default:50]')
 
     # Training
     parser.add_argument('--lr', type=float, default=0.0005, help='learning rate')
     parser.add_argument('--lr_descent', action='store_true', default=False, help='learning rate descent')
     parser.add_argument('--grad_clip', action='store_true', default=False, help='for gradient clipping')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, help='for gradient clipping max gradient normalization')
-
     parser.add_argument('-m', type=int, default=3, help='decode summary length')
 
     args = parser.parse_args()
@@ -317,8 +300,8 @@ def main():
     # train_log setting
     if not os.path.exists(LOG_PATH):
         os.makedirs(LOG_PATH)
-    nowTime = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_path = os.path.join(LOG_PATH, "train_" + nowTime)
+    now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path = os.path.join(LOG_PATH, "train_" + now_time)
     file_handler = logging.FileHandler(log_path)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -348,13 +331,14 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1)
     del dataset
 
-    valid_dataset = ExampleSet(VALID_FILE, vocab, args.doc_max_timesteps, args.sent_max_len)
+    valid_dataset= ExampleSet(VALID_FILE, vocab, args.doc_max_timesteps, args.sent_max_len)
     valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
     if args.cuda:
         model.to(torch.device("cuda"))
         logger.info("[INFO] Use cuda")
     setup_training(model, train_loader, valid_loader, valid_dataset, args)
+
 
 if __name__ == '__main__':
     main()

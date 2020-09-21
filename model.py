@@ -46,8 +46,8 @@ class MyModel(nn.Module):
         super(MyModel, self).__init__()
 
         self.cuda = args.cuda
-        self.nhead = args.n_head  # 多头注意力模型的头数（默认为8)
-        self.hidden = args.word_emb_dim  # 编码器和解码器输入的大小（默认512）
+        self.nhead = args.n_head  # 多头注意力模型的头数
+        self.hidden = args.word_emb_dim  # 编码器和解码器输入的大小
         self.doc_max_timesteps = args.doc_max_timesteps # 输入文档的最大句子数目
         self.outputSize = args.vocab_size  # 词汇表大小(用于预测每个单词输出的概率)
         self.sent_max_len = args.sent_max_len  # 输入句子的最大长度
@@ -58,7 +58,7 @@ class MyModel(nn.Module):
         self.pos_decoder = PositionalEncoding(self.hidden, dropout, self.sent_max_len*self.doc_max_timesteps)  # 输出的位置编码
 
         self.transformer = nn.Transformer(d_model=self.hidden, nhead=self.nhead, num_encoder_layers=nlayers,
-                                          num_decoder_layers=nlayers, dim_feedforward=self.hidden, dropout=dropout)
+                                          num_decoder_layers=nlayers, dim_feedforward=self.hidden, dropout=dropout, activation="gelu")
 
         self.src_mask = None  # 输入序列的mask
         self.trg_mask = None  # 输出序列的mask
@@ -66,7 +66,7 @@ class MyModel(nn.Module):
 
         self.fc_out_tran = nn.Linear(self.hidden, self.outputSize)
 
-        self.fc_out = nn.Linear(2*self.hidden,2)
+        self.fc_out = nn.Linear(2*self.hidden, 2)
 
         # word level BiLSTM
         self.word_RNN = nn.LSTM(
@@ -76,6 +76,7 @@ class MyModel(nn.Module):
             bidirectional=True
         )
 
+    @staticmethod
     def generate_square_subsequent_mask(self, sz):
         """
         为序列生成mask
@@ -86,7 +87,13 @@ class MyModel(nn.Module):
         mask = mask.masked_fill(mask == 1, float('-inf'))
         return mask
 
+    @staticmethod
     def make_len_mask(self, inp):
+        """
+
+        :param inp:
+        :return:
+        """
         return (inp == 0).transpose(0, 1)
 
     def forward(self, source, target):
@@ -116,11 +123,11 @@ class MyModel(nn.Module):
                                       src_key_padding_mask=src_pad_mask, tgt_key_padding_mask=trg_pad_mask,
                                       memory_key_padding_mask=src_pad_mask).transpose(1, 0)
 
-            Classifier1 = F.softmax(self.fc_out_tran(trans),dim=2).max(dim=2)
+            classifier = F.softmax(self.fc_out_tran(trans),dim=2).max(dim=2)
 
-            word_embed = self.embed(Classifier1[1])
+            word_embed = self.embed(classifier[1])
             word_hidden = self.word_RNN(word_embed)[0]
-            doc =torch.sum(word_hidden, dim = 1)/(self.sent_max_len*self.doc_max_timesteps)
+            doc = torch.sum(word_hidden, dim = 1)/(self.sent_max_len*self.doc_max_timesteps)
             output = self.fc_out(doc)
 
             outputs.append(output)

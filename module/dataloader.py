@@ -42,15 +42,15 @@ class Example(object):
         self.enc_sent_input_pad = []
         self.enc_sent_input_pad_together = []
 
-        # Store the original strings
-        self.original_article_sents = article_sents
-        self.original_abstract = "\n".join(abstract_sents)
-
         if(len(article_sents) > doc_max_timesteps ):
             article_sents = article_sents[:doc_max_timesteps]
         else:
             for i in range(doc_max_timesteps - len(article_sents)):
                 article_sents.append('[PAD]')
+
+        # Store the original strings
+        self.original_article_sents = article_sents
+        self.original_abstract = "\n".join(abstract_sents)
 
         # Process the sentences
         for sent in article_sents:

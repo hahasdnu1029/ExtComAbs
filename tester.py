@@ -127,8 +127,9 @@ class SLTester(TestPipLine):
         self.running_loss += float(loss.data)
 
         for j in range(len(outputs)):
-            labels[j] = labels[j].to(torch.device("cpu"))
+            label = labels[j].cpu()
             idx = indexs[j]
+
             example = dataset.get_example(idx)
             sent_max_number = example.doc_max_timesteps
             original_article_sents = example.original_article_sents
@@ -138,7 +139,7 @@ class SLTester(TestPipLine):
 
 
             if blocking:
-                pred_idx = self.ngram_blocking(original_article_sents[:sent_max_number], softmax_value[j], self.blocking_win,
+                pred_idx = self.ngram_blocking(original_article_sents, softmax_value, self.blocking_win,
                                                min(self.m, sent_max_number))
             else:
                 topk, pred_idx = torch.topk(softmax_value, min(self.m, sent_max_number))
@@ -149,10 +150,10 @@ class SLTester(TestPipLine):
             self.extracts.append(pred_idx.tolist())
 
             self.pred += prediction.sum()
-            self.true += labels.sum()
+            self.true += label.sum()
 
-            self.match_true += ((prediction == labels[j]) & (prediction == 1)).sum()
-            self.match += (prediction == labels[j]).sum()
+            self.match_true += ((prediction == label) & (prediction == 1)).sum()
+            self.match += (prediction == label).sum()
             self.total_sentence_num += sent_max_number
             self.example_num += 1
 
@@ -198,7 +199,6 @@ class SLTester(TestPipLine):
                 if len(S) >= k:
                     break
         S = torch.LongTensor(S)
-        # print(sorted_idx, S)
         return S
 
     @property
