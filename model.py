@@ -52,13 +52,17 @@ class MyModel(nn.Module):
         self.outputSize = args.vocab_size  # 词汇表大小(用于预测每个单词输出的概率)
         self.sent_max_len = args.sent_max_len  # 输入句子的最大长度
 
-        self.embed = embed # encoder和decoder输入的embedding
-        self.pos_encoder = PositionalEncoding(self.hidden, dropout,self.sent_max_len )  # 输入的位置编码
+        self.embed = embed  # encoder和decoder输入的embedding
+        self.pos_encoder = PositionalEncoding(self.hidden, dropout, self.sent_max_len )  # 输入的位置编码
 
         self.pos_decoder = PositionalEncoding(self.hidden, dropout, self.sent_max_len*self.doc_max_timesteps)  # 输出的位置编码
 
         self.transformer = nn.Transformer(d_model=self.hidden, nhead=self.nhead, num_encoder_layers=nlayers,
                                           num_decoder_layers=nlayers, dim_feedforward=self.hidden, dropout=dropout, activation="gelu")
+
+        self.transformerEncoderLayer = nn.TransformerEncoderLayer(d_model=self.hidden, nhead = self.nhead, dim_feedforward=self.hidden, dropout=0.1, activation="gelu")
+
+        self.transformerEncoder = nn.TransformerEncoder(self.transformerEncoderLayer, num_layers=6)
 
         self.src_mask = None  # 输入序列的mask
         self.trg_mask = None  # 输出序列的mask
@@ -66,7 +70,8 @@ class MyModel(nn.Module):
 
         self.fc_out_tran = nn.Linear(self.hidden, self.outputSize)
 
-        self.fc_out = nn.Linear(2*self.hidden, 2)
+        # self.fc_out = nn.Linear(2*self.hidden, 2)
+        self.fc_out = nn.Linear(self.hidden, 2)
 
         # word level BiLSTM
         self.word_RNN = nn.LSTM(
@@ -76,7 +81,7 @@ class MyModel(nn.Module):
             bidirectional=True
         )
 
-    @staticmethod
+
     def generate_square_subsequent_mask(self, sz):
         """
         为序列生成mask
@@ -87,49 +92,34 @@ class MyModel(nn.Module):
         mask = mask.masked_fill(mask == 1, float('-inf'))
         return mask
 
-    @staticmethod
-    def make_len_mask(self, inp):
-        """
-
-        :param inp:
-        :return:
-        """
-        return (inp == 0).transpose(0, 1)
-
     def forward(self, source, target):
-        outputs = []
-        for i in range(source.shape[0]):
+        # 交换batch size和sequence len
+        src = source.transpose(1, 0)
+        trg = target.repeat(self.doc_max_timesteps, 1).transpose(1, 0)
 
-            # 交换batch size和sequece len
-            src = source[i].transpose(1, 0)
-            trg = target[i].repeat(self.doc_max_timesteps, 1).transpose(1, 0)
+        # 解码器masked以防止当前位置Attend到后续位置
+        if self.trg_mask is None or self.trg_mask.size(0) != len(trg):
+            self.trg_mask = self.generate_square_subsequent_mask(len(trg)).to(trg.device)
 
-            # 解码器masked以防止当前位置Attend到后续位置
-            if self.trg_mask is None or self.trg_mask.size(0) != len(trg):
-                self.trg_mask = self.generate_square_subsequent_mask(len(trg)).to(trg.device)
+        # Transformer根据每个句子生成文档
+        src = self.embed(src)
+        src = self.pos_encoder(src)
 
-            src_pad_mask = self.make_len_mask(src)
-            trg_pad_mask = self.make_len_mask(trg)
+        trg = self.embed(trg)
+        trg = self.pos_decoder(trg)
 
-            src = self.embed(src)
-            src = self.pos_encoder(src)
+        gen_document = self.transformer(src, trg, tgt_mask=self.trg_mask).transpose(1, 0)
 
-            trg = self.embed(trg)
-            trg = self.pos_decoder(trg)
+        classifier = F.softmax(self.fc_out_tran(gen_document), dim=2).max(dim=2)[1]
 
-            # output = self.transformer(src, trg, tgt_mask=self.trg_mask).transpose(1, 0)
-            trans = self.transformer(src, trg, src_mask=self.src_mask, tgt_mask=self.trg_mask,
-                                      memory_mask=self.memory_mask,
-                                      src_key_padding_mask=src_pad_mask, tgt_key_padding_mask=trg_pad_mask,
-                                      memory_key_padding_mask=src_pad_mask).transpose(1, 0)
+        # TransformerEncoder对生成文档编码
+        doc_word_embed = self.embed(classifier)
 
-            classifier = F.softmax(self.fc_out_tran(trans),dim=2).max(dim=2)
+        # word_hidden = self.word_RNN(word_embed)[0]
+        doc_word_hidden = self.transformerEncoder(doc_word_embed)
 
-            word_embed = self.embed(classifier[1])
-            word_hidden = self.word_RNN(word_embed)[0]
-            doc = torch.sum(word_hidden, dim = 1)/(self.sent_max_len*self.doc_max_timesteps)
-            output = self.fc_out(doc)
+        doc = torch.sum(doc_word_hidden, dim = 1)/(self.sent_max_len*self.doc_max_timesteps)
 
-            outputs.append(output)
+        output = self.fc_out(doc)
 
-        return outputs
+        return output
