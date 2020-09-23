@@ -67,7 +67,7 @@ def setup_training(model, train_loader, valid_loader, valset, args):
         os.makedirs(train_dir)
 
     try:
-        #run_eval(model, valid_loader, valset, args, 0, 0, 0, 0, now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+        # run_eval(model, valid_loader, valset, args, 0, 0, 0, 0, now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
         run_training(model, train_loader, valid_loader, valset, args, train_dir)
     except KeyboardInterrupt:
         logger.error("[Error] Caught keyboard interrupt on worker. Stopping supervisor...")
@@ -101,7 +101,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
         epoch_start_time = time.time()
         epoch_loss = 0.0
         train_loss = 0.0
-        for i, (features_in, features_out, label, index) in enumerate(train_loader):
+        for i, (features_in, features_out, labels, indexs) in enumerate(train_loader):
             model.train()
 
             iter_start_time = time.time()
@@ -109,11 +109,17 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             if args.cuda:
                 features_in = features_in.to(torch.device("cuda"))
                 features_out = features_out.to(torch.device("cuda"))
-                label = label.to(torch.device("cuda"))
+                labels = labels.to(torch.device("cuda"))
 
-            output = model(features_in, features_out)
-
-            loss = criterion(output, label)
+            outputs = model(features_in, features_out)
+            for j in range(len(outputs)):
+                outputs[j] = outputs[j].transpose(2, 1)
+                features_out_new = features_out[j].repeat(features_in[j].shape[0], 1)
+                if j == 0:
+                    loss = criterion(outputs[j], features_out_new)
+                else:
+                    loss.add_(criterion(outputs[j], features_out_new))
+            loss = loss / args.batch_size
 
             optimizer.zero_grad()
 
@@ -139,6 +145,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             for param_group in list(optimizer.param_groups):
                 param_group['lr'] = new_lr
             logger.info("[INFO] The learning rate now is %f", new_lr)
+
         # 每个epoch的平均loss
         epoch_avg_loss = epoch_loss / len(train_loader)
         logger.info('   | end of epoch {:3d} | time: {:5.2f}s | epoch train loss {:5.4f} | '
@@ -157,15 +164,15 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
             save_model(model, os.path.join(train_dir, "earlystop"))
             sys.exit(1)
 
-        # 每个epoch结束对模型进行评估，best_loss,best_F,non_descent_cnt,saveNo
+        # # 每个epoch结束对模型进行评估，best_loss,best_F,non_descent_cnt,saveNo
         now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        best_loss, best_f, non_descent_cnt, save_no = run_eval(model, valid_loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, now_time)
-
-        # model评估连续3次未下降停止训练
-        if non_descent_cnt >= 3:
-            logger.error("[Error] val loss does not descent for three times. Stopping supervisor...")
-            save_model(model, os.path.join(train_dir, "earlystop"))
-            return
+        run_eval(model, valid_loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, now_time)
+        #
+        # # model评估连续3次未下降停止训练
+        # if non_descent_cnt >= 3:
+        #     logger.error("[Error] val loss does not descent for three times. Stopping supervisor...")
+        #     save_model(model, os.path.join(train_dir, "earlystop"))
+        #     return
 
 
 def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, now_time):
@@ -191,63 +198,66 @@ def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, sa
 
     with torch.no_grad():
         tester = SLTester(model, args.m)
-        for i, (features_in, features_out, label, index) in enumerate(loader):
+        for i, (features_in, features_out, labels, indexs) in enumerate(loader):
             if(args.cuda):
                 features_in = features_in.to(torch.device("cuda"))
                 features_out = features_out.to(torch.device("cuda"))
                 label = label.to(torch.device("cuda"))
-            tester.evaluation(features_in, features_out, label, index, valset, now_time, True)
+            tester.evaluation(features_in, features_out, labels, indexs, valset, now_time, True)
 
     running_avg_loss = tester.running_avg_loss
 
-    if len(tester.hyps) == 0 or len(tester.refer) == 0:
-        logger.error("During testing, no hyps is selected!")
-        return
-    rouge = Rouge()
-    scores_all = rouge.get_scores(tester.hyps, tester.refer, avg=True)
-    logger.info('[INFO] End of valid | time: {:5.2f}s | valid loss {:5.4f} | ' .format((time.time() - iter_start_time), float(running_avg_loss)))
+    print(tester.running_loss)
+    print(running_avg_loss)
 
-    res = "Rouge1:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-1']['p'], scores_all['rouge-1']['r'], scores_all['rouge-1']['f']) \
-          + "Rouge2:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-2']['p'], scores_all['rouge-2']['r'], scores_all['rouge-2']['f']) \
-          + "Rougel:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-l']['p'], scores_all['rouge-l']['r'], scores_all['rouge-l']['f'])
-
-    logger.info(res)
-
-    tester.getMetric()
-
-    F = tester.labelMetric
-
-    if best_loss is None or running_avg_loss < best_loss:
-        bestmodel_save_path = os.path.join(eval_dir, 'bestmodel_%d' % (save_no % 3))  # this is where checkpoints of best models are saved
-        if best_loss is not None:
-            logger.info(
-                '[INFO] Found new best model with %.6f running_avg_loss. The original loss is %.6f, Saving to %s',
-                float(running_avg_loss), float(best_loss), bestmodel_save_path)
-        else:
-            logger.info(
-                '[INFO] Found new best model with %.6f running_avg_loss. The original loss is None, Saving to %s',
-                float(running_avg_loss), bestmodel_save_path)
-        with open(bestmodel_save_path, 'wb') as f:
-            torch.save(model.state_dict(), f)
-        best_loss = running_avg_loss
-        non_descent_cnt = 0
-        save_no += 1
-    else:
-        non_descent_cnt += 1
-
-    if best_f is None or best_f < F:
-        bestmodel_save_path = os.path.join(eval_dir, 'bestFmodel')  # this is where checkpoints of best models are saved
-        if best_f is not None:
-            logger.info('[INFO] Found new best model with %.6f F. The original F is %.6f, Saving to %s', float(F),
-                        float(best_f), bestmodel_save_path)
-        else:
-            logger.info('[INFO] Found new best model with %.6f F. The original F is None, Saving to %s', float(F),
-                        bestmodel_save_path)
-        with open(bestmodel_save_path, 'wb') as f:
-            torch.save(model.state_dict(), f)
-        best_f = F
-
-    return best_loss, best_f, non_descent_cnt, save_no
+    # if len(tester.hyps) == 0 or len(tester.refer) == 0:
+    #     logger.error("During testing, no hyps is selected!")
+    #     return
+    # rouge = Rouge()
+    # scores_all = rouge.get_scores(tester.hyps, tester.refer, avg=True)
+    # logger.info('[INFO] End of valid | time: {:5.2f}s | valid loss {:5.4f} | ' .format((time.time() - iter_start_time), float(running_avg_loss)))
+    #
+    # res = "Rouge1:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-1']['p'], scores_all['rouge-1']['r'], scores_all['rouge-1']['f']) \
+    #       + "Rouge2:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-2']['p'], scores_all['rouge-2']['r'], scores_all['rouge-2']['f']) \
+    #       + "Rougel:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-l']['p'], scores_all['rouge-l']['r'], scores_all['rouge-l']['f'])
+    #
+    # logger.info(res)
+    #
+    # tester.getMetric()
+    #
+    # F = tester.labelMetric
+    #
+    # if best_loss is None or running_avg_loss < best_loss:
+    #     bestmodel_save_path = os.path.join(eval_dir, 'bestmodel_%d' % (save_no % 3))  # this is where checkpoints of best models are saved
+    #     if best_loss is not None:
+    #         logger.info(
+    #             '[INFO] Found new best model with %.6f running_avg_loss. The original loss is %.6f, Saving to %s',
+    #             float(running_avg_loss), float(best_loss), bestmodel_save_path)
+    #     else:
+    #         logger.info(
+    #             '[INFO] Found new best model with %.6f running_avg_loss. The original loss is None, Saving to %s',
+    #             float(running_avg_loss), bestmodel_save_path)
+    #     with open(bestmodel_save_path, 'wb') as f:
+    #         torch.save(model.state_dict(), f)
+    #     best_loss = running_avg_loss
+    #     non_descent_cnt = 0
+    #     save_no += 1
+    # else:
+    #     non_descent_cnt += 1
+    #
+    # if best_f is None or best_f < F:
+    #     bestmodel_save_path = os.path.join(eval_dir, 'bestFmodel')  # this is where checkpoints of best models are saved
+    #     if best_f is not None:
+    #         logger.info('[INFO] Found new best model with %.6f F. The original F is %.6f, Saving to %s', float(F),
+    #                     float(best_f), bestmodel_save_path)
+    #     else:
+    #         logger.info('[INFO] Found new best model with %.6f F. The original F is None, Saving to %s', float(F),
+    #                     bestmodel_save_path)
+    #     with open(bestmodel_save_path, 'wb') as f:
+    #         torch.save(model.state_dict(), f)
+    #     best_f = F
+    #
+    # return best_loss, best_f, non_descent_cnt, save_no
 
 
 def main():
@@ -266,9 +276,9 @@ def main():
     # Hyperparameters
     parser.add_argument('--gpu', type=str, default='0', help='GPU ID to use. [default: 0]')
     parser.add_argument('--cuda', action='store_true', default=False, help='GPU or CPU [default: False]')
-    parser.add_argument('--vocab_size', type=int, default=5,help='Size of vocabulary. [default: 50000]')
+    parser.add_argument('--vocab_size', type=int, default=1000,help='Size of vocabulary. [default: 50000]')
     parser.add_argument('--n_epochs', type=int, default=3, help='Number of epochs [default: 20]')
-    parser.add_argument('--batch_size', type=int, default=1, help='Mini batch size [default: 32]')
+    parser.add_argument('--batch_size', type=int, default=2, help='Mini batch size [default: 32]')
     parser.add_argument('--word_embedding', action='store_true', default=True, help='whether to use Word embedding [default: True]')
     parser.add_argument('--word_emb_dim', type=int, default=4, help='Word embedding size [default: 256],Glove dim is 300')
     parser.add_argument('--embed_train', action='store_true', default=False,help='whether to train Word embedding [default: False]')
@@ -278,8 +288,8 @@ def main():
 
     # Training
     parser.add_argument('--lr', type=float, default=0.0005, help='learning rate')
-    parser.add_argument('--lr_descent', action='store_true', default=False, help='learning rate descent')
-    parser.add_argument('--grad_clip', action='store_true', default=False, help='for gradient clipping')
+    parser.add_argument('--lr_descent', action='store_true', default=True, help='learning rate descent')
+    parser.add_argument('--grad_clip', action='store_true', default=True, help='for gradient clipping')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, help='for gradient clipping max gradient normalization')
     parser.add_argument('-m', type=int, default=3, help='decode summary length')
 
@@ -325,11 +335,11 @@ def main():
     logger.info("[MODEL] ExtComAbs ")
 
     dataset = ExampleSet(DATA_FILE, vocab, args.doc_max_timesteps, args.sent_max_len)
-    train_loader = torch.utils.data.DataLoader(dataset, batch_size=None, shuffle=False, num_workers=1)
+    train_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1)
     del dataset
 
     valid_dataset= ExampleSet(VALID_FILE, vocab, args.doc_max_timesteps, args.sent_max_len)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=None, shuffle=False, num_workers=1)
+    valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
     if args.cuda:
         model.to(torch.device("cuda"))

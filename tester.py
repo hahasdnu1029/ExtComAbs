@@ -119,65 +119,72 @@ class SLTester(TestPipLine):
         :return:
         """
         self.batch_number += 1
-        output = self.model.forward(features_in, features_out)
-
-        loss = self.criterion(output, label)
-
-
-        self.running_loss += float(loss.data)
-
-
-        label = label.cpu()
-
-        example = dataset.get_example(index)
-        sent_max_number = example.doc_max_timesteps
-        original_article_sents = example.original_article_sents
-        refer = example.original_abstract
-
-        softmax_value = F.softmax(output, dim=1).max(dim=1)[1]
-
-        print(softmax_value)
+        outputs = self.model.forward(features_in, features_out)
+        for i in range(len(outputs)):
+            outputs[i] = outputs[i].transpose(2, 1)
+            features_out_new = features_out[i].repeat(features_in[i].shape[0], 1)
+            softmax_value = F.softmax(outputs[i], dim=1).argmax(dim=1)
+            print(softmax_value.data)
+            print(features_out[i].data)
+            print("======================")
+            if i == 0:
+                loss = self.criterion(outputs[i], features_out_new)
+            else:
+                loss.add_(self.criterion(outputs[i], features_out_new))
+        self.running_loss += (loss.data/features_in.shape[0])
 
 
-        if blocking:
-            pred_idx = self.ngram_blocking(original_article_sents, softmax_value, self.blocking_win,
-                                           min(self.m, sent_max_number))
-        else:
-            topk, pred_idx = torch.topk(softmax_value, min(self.m, sent_max_number))
-
-        prediction = torch.zeros(sent_max_number).long()
-        prediction[pred_idx] = 1
-
-        self.extracts.append(pred_idx.tolist())
-
-        self.pred += prediction.sum()
-        self.true += label.sum()
-
-        self.match_true += ((prediction == label) & (prediction == 1)).sum()
-        self.match += (prediction == label).sum()
-        self.total_sentence_num += sent_max_number
-        self.example_num += 1
-
-        hyps = "\n".join(original_article_sents[id] for id in pred_idx if id < sent_max_number)
-
-        path1 = os.path.join("save/eval","hyper")
-        path2 = os.path.join("save/eval", "refer")
-        if not os.path.exists(path1):
-            os.mkdir(path1)
-        if not os.path.exists(path2):
-            os.mkdir(path2)
-        hyper_txt = os.path.join(path1, "hyper"+now_time+".txt")
-        refer_txt = os.path.join(path2, "refer"+now_time+".txt")
-        h_f = open(hyper_txt, "a+")
-        h_f.write(hyps)
-        h_f.write('\n')
-        h_f.write('\n')
-        r_f = open(refer_txt, "a+")
-        r_f.write(refer)
-        r_f.write('\n')
-        r_f.write('\n')
-        self._hyps.append(hyps)
-        self._refer.append(refer)
+        # label = label.cpu()
+        #
+        # example = dataset.get_example(index)
+        # sent_max_number = example.doc_max_timesteps
+        # original_article_sents = example.original_article_sents
+        # refer = example.original_abstract
+        #
+        # softmax_value = F.softmax(output, dim=1).max(dim=1)[1]
+        #
+        # print(softmax_value)
+        #
+        #
+        # if blocking:
+        #     pred_idx = self.ngram_blocking(original_article_sents, softmax_value, self.blocking_win,
+        #                                    min(self.m, sent_max_number))
+        # else:
+        #     topk, pred_idx = torch.topk(softmax_value, min(self.m, sent_max_number))
+        #
+        # prediction = torch.zeros(sent_max_number).long()
+        # prediction[pred_idx] = 1
+        #
+        # self.extracts.append(pred_idx.tolist())
+        #
+        # self.pred += prediction.sum()
+        # self.true += label.sum()
+        #
+        # self.match_true += ((prediction == label) & (prediction == 1)).sum()
+        # self.match += (prediction == label).sum()
+        # self.total_sentence_num += sent_max_number
+        # self.example_num += 1
+        #
+        # hyps = "\n".join(original_article_sents[id] for id in pred_idx if id < sent_max_number)
+        #
+        # path1 = os.path.join("save/eval","hyper")
+        # path2 = os.path.join("save/eval", "refer")
+        # if not os.path.exists(path1):
+        #     os.mkdir(path1)
+        # if not os.path.exists(path2):
+        #     os.mkdir(path2)
+        # hyper_txt = os.path.join(path1, "hyper"+now_time+".txt")
+        # refer_txt = os.path.join(path2, "refer"+now_time+".txt")
+        # h_f = open(hyper_txt, "a+")
+        # h_f.write(hyps)
+        # h_f.write('\n')
+        # h_f.write('\n')
+        # r_f = open(refer_txt, "a+")
+        # r_f.write(refer)
+        # r_f.write('\n')
+        # r_f.write('\n')
+        # self._hyps.append(hyps)
+        # self._refer.append(refer)
 
     def getMetric(self):
         logger.info("[INFO] Validset match_true %d, pred %d, true %d, total %d, match %d",

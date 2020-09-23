@@ -19,9 +19,16 @@
 import torch
 
 import torch.nn as nn
-import numpy as np
 
-a = torch.Tensor([[1,2,3],[4,5,6]])
-b = torch.tensor([[1,2,3],[4,5,6]])
-print(a)
-print(b)
+loss = nn.CrossEntropyLoss()
+# # input is of size nBatch x nClasses = 3 x 5
+# input = torch.autograd.Variable(torch.randn(3, 5, 4), requires_grad=True)
+# # each element in target has to have 0 <= value < nclasses
+# target = torch.autograd.Variable(torch.LongTensor([[1, 0, 4,1,1],[1, 0, 4,1,1],[1, 0, 4,1,1]]))
+# output = loss(input, target)
+
+for i in range(10):
+    a =i
+print(i)
+
+

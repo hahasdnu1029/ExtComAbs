@@ -17,7 +17,6 @@
 # ==============================================================================
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import math
 
 
@@ -70,18 +69,6 @@ class MyModel(nn.Module):
 
         self.fc_out_tran = nn.Linear(self.hidden, self.outputSize)
 
-        # self.fc_out = nn.Linear(2*self.hidden, 2)
-        self.fc_out = nn.Linear(self.hidden, 2)
-
-        # word level BiLSTM
-        self.word_RNN = nn.LSTM(
-            input_size=args.word_emb_dim,
-            hidden_size=self.hidden,
-            batch_first=True,
-            bidirectional=True
-        )
-
-
     def generate_square_subsequent_mask(self, sz):
         """
         为序列生成mask
@@ -92,34 +79,42 @@ class MyModel(nn.Module):
         mask = mask.masked_fill(mask == 1, float('-inf'))
         return mask
 
+
+    def make_len_mask(self, inp):
+        """
+
+        :param inp:
+        :return:
+        """
+        return (inp == 0).transpose(0, 1)
+
     def forward(self, source, target):
-        # 交换batch size和sequence len
-        src = source.transpose(1, 0)
-        trg = target.repeat(self.doc_max_timesteps, 1).transpose(1, 0)
+        outputs = []
+        for i in range(source.shape[0]):
+            # 交换batch size和sequece len
+            src = source[i].transpose(1, 0)
+            trg = target[i].repeat(self.doc_max_timesteps, 1).transpose(1, 0)
 
-        # 解码器masked以防止当前位置Attend到后续位置
-        if self.trg_mask is None or self.trg_mask.size(0) != len(trg):
-            self.trg_mask = self.generate_square_subsequent_mask(len(trg)).to(trg.device)
+            # 解码器masked以防止当前位置Attend到后续位置
+            if self.trg_mask is None or self.trg_mask.size(0) != len(trg):
+                self.trg_mask = self.generate_square_subsequent_mask(len(trg)).to(trg.device)
 
-        # Transformer根据每个句子生成文档
-        src = self.embed(src)
-        src = self.pos_encoder(src)
+            src_pad_mask = self.make_len_mask(src)
+            trg_pad_mask = self.make_len_mask(trg)
 
-        trg = self.embed(trg)
-        trg = self.pos_decoder(trg)
+            src = self.embed(src)
+            src = self.pos_encoder(src)
 
-        gen_document = self.transformer(src, trg, tgt_mask=self.trg_mask).transpose(1, 0)
+            trg = self.embed(trg)
+            trg = self.pos_decoder(trg)
 
-        classifier = F.softmax(self.fc_out_tran(gen_document), dim=2).max(dim=2)[1]
+            # gen_document = self.transformer(src, trg, tgt_mask=self.trg_mask).transpose(1, 0)
+            gen_document = self.transformer(src, trg, src_mask=self.src_mask, tgt_mask=self.trg_mask,
+                                      memory_mask=self.memory_mask,
+                                      src_key_padding_mask=src_pad_mask, tgt_key_padding_mask=trg_pad_mask,
+                                      memory_key_padding_mask=src_pad_mask).transpose(1, 0)
 
-        # TransformerEncoder对生成文档编码
-        doc_word_embed = self.embed(classifier)
+            output = self.fc_out_tran(gen_document)
+            outputs.append(output)
 
-        # word_hidden = self.word_RNN(word_embed)[0]
-        doc_word_hidden = self.transformerEncoder(doc_word_embed)
-
-        doc = torch.sum(doc_word_hidden, dim = 1)/(self.sent_max_len*self.doc_max_timesteps)
-
-        output = self.fc_out(doc)
-
-        return output
+        return outputs
