@@ -27,8 +27,9 @@ loss = nn.CrossEntropyLoss()
 # target = torch.autograd.Variable(torch.LongTensor([[1, 0, 4,1,1],[1, 0, 4,1,1],[1, 0, 4,1,1]]))
 # output = loss(input, target)
 
-for i in range(10):
-    a =i
-print(i)
+a = torch.randn(3,4)
+print(a.dtype)
+print(a)
+print((a[0][0]).data)
 
 

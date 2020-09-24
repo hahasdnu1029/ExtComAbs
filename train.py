@@ -43,7 +43,7 @@ def save_model(model, save_file):
     logger.info('[INFO] Saving model to %s', save_file)
 
 
-def setup_training(model, train_loader, valid_loader, valset, args):
+def setup_training(model, train_loader, valid_loader, valset, args ,vocab):
     """ Does setup before starting training (run_training)
     
         :param model: the model
@@ -67,14 +67,14 @@ def setup_training(model, train_loader, valid_loader, valset, args):
         os.makedirs(train_dir)
 
     try:
-        # run_eval(model, valid_loader, valset, args, 0, 0, 0, 0, now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
-        run_training(model, train_loader, valid_loader, valset, args, train_dir)
+        # run_eval(model, valid_loader, valset, args, 0, 0, 0, 0, vocab, now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S'))
+        run_training(model, train_loader, valid_loader, valset, args, train_dir, vocab)
     except KeyboardInterrupt:
         logger.error("[Error] Caught keyboard interrupt on worker. Stopping supervisor...")
         save_model(model, os.path.join(train_dir, "earlystop"))
 
 
-def run_training(model, train_loader, valid_loader, valset, args, train_dir):
+def run_training(model, train_loader, valid_loader, valset, args, train_dir, vocab):
     """  Repeatedly runs training iterations, logging loss to screen and log files
     
         :param model: the model
@@ -166,7 +166,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
 
         # # 每个epoch结束对模型进行评估，best_loss,best_F,non_descent_cnt,saveNo
         now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        run_eval(model, valid_loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, now_time)
+        run_eval(model, valid_loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, vocab, now_time)
         #
         # # model评估连续3次未下降停止训练
         # if non_descent_cnt >= 3:
@@ -175,7 +175,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir):
         #     return
 
 
-def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, now_time):
+def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, vocab, now_time):
     ''' 
         Repeatedly runs eval iterations, logging to screen and writing summaries. Saves the model with the best loss seen so far.
         :param model: the model
@@ -203,7 +203,7 @@ def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, sa
                 features_in = features_in.to(torch.device("cuda"))
                 features_out = features_out.to(torch.device("cuda"))
                 label = label.to(torch.device("cuda"))
-            tester.evaluation(features_in, features_out, labels, indexs, valset, now_time, True)
+            tester.evaluation(features_in, features_out, labels, indexs, valset, now_time, vocab, True)
 
     running_avg_loss = tester.running_avg_loss
 
@@ -344,7 +344,7 @@ def main():
     if args.cuda:
         model.to(torch.device("cuda"))
         logger.info("[INFO] Use cuda")
-    setup_training(model, train_loader, valid_loader, valid_dataset, args)
+    setup_training(model, train_loader, valid_loader, valid_dataset, args , vocab)
 
 
 if __name__ == '__main__':

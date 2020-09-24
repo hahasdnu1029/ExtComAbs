@@ -107,7 +107,7 @@ class SLTester(TestPipLine):
         self.criterion = torch.nn.CrossEntropyLoss()
         self.blocking_win = blocking_win
 
-    def evaluation(self, features_in, features_out, label, index, dataset, now_time, blocking=False):
+    def evaluation(self, features_in, features_out, label, index, dataset, now_time, vocab,blocking=False):
         """
 
         :param features_in:
@@ -132,7 +132,8 @@ class SLTester(TestPipLine):
             else:
                 loss.add_(self.criterion(outputs[i], features_out_new))
         self.running_loss += (loss.data/features_in.shape[0])
-
+        vocab.id2word()
+        vocab.size()
 
         # label = label.cpu()
         #
