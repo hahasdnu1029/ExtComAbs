@@ -102,6 +102,7 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir, voc
         epoch_loss = 0.0
         train_loss = 0.0
         for i, (features_in, features_out, labels, indexs) in enumerate(train_loader):
+
             model.train()
 
             iter_start_time = time.time()
@@ -112,14 +113,10 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir, voc
                 labels = labels.to(torch.device("cuda"))
 
             outputs = model(features_in, features_out)
-            for j in range(len(outputs)):
-                outputs[j] = outputs[j].transpose(2, 1)
-                features_out_new = features_out[j].repeat(features_in[j].shape[0], 1)
-                if j == 0:
-                    loss = criterion(outputs[j], features_out_new)
-                else:
-                    loss.add_(criterion(outputs[j], features_out_new))
-            loss = loss / args.batch_size
+
+            outputs = torch.transpose(outputs, 2, 1)
+
+            loss = criterion(outputs, labels)
 
             optimizer.zero_grad()
 
@@ -133,10 +130,9 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir, voc
             train_loss += float(loss.data)
             epoch_loss += float(loss.data)
 
-            # 每100个batch打印输出一下loss
-            if i != 0 and i % 100 == 0:
+            if True:
                 logger.info('       | end of iter {:3d} | time: {:5.2f}s | train loss {:5.4f} | '
-                                .format(i, (time.time() - iter_start_time),float(train_loss / 100)))
+                                .format(i, (time.time() - iter_start_time),float(train_loss)))
                 train_loss = 0.0
 
         # 随epoch增大，学习虑逐渐降低
@@ -164,15 +160,16 @@ def run_training(model, train_loader, valid_loader, valset, args, train_dir, voc
             save_model(model, os.path.join(train_dir, "earlystop"))
             sys.exit(1)
 
-        # # 每个epoch结束对模型进行评估，best_loss,best_F,non_descent_cnt,saveNo
+        # 每个epoch结束对模型进行评估，best_loss,best_F,non_descent_cnt,saveNo
         now_time = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        run_eval(model, valid_loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, vocab, now_time)
-        #
-        # # model评估连续3次未下降停止训练
-        # if non_descent_cnt >= 3:
-        #     logger.error("[Error] val loss does not descent for three times. Stopping supervisor...")
-        #     save_model(model, os.path.join(train_dir, "earlystop"))
-        #     return
+
+        best_loss, best_f, non_descent_cnt, save_no = run_eval(model, valid_loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, vocab, now_time)
+
+        # model评估连续3次未下降停止训练
+        if non_descent_cnt >= 3:
+            logger.error("[Error] val loss does not descent for three times. Stopping supervisor...")
+            save_model(model, os.path.join(train_dir, "earlystop"))
+            return
 
 
 def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, save_no, vocab, now_time):
@@ -202,7 +199,7 @@ def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, sa
             if(args.cuda):
                 features_in = features_in.to(torch.device("cuda"))
                 features_out = features_out.to(torch.device("cuda"))
-                label = label.to(torch.device("cuda"))
+                labels = labels.to(torch.device("cuda"))
             tester.evaluation(features_in, features_out, labels, indexs, valset, now_time, vocab, True)
 
     running_avg_loss = tester.running_avg_loss
@@ -210,54 +207,54 @@ def run_eval(model, loader, valset, args, best_loss, best_f, non_descent_cnt, sa
     print(tester.running_loss)
     print(running_avg_loss)
 
-    # if len(tester.hyps) == 0 or len(tester.refer) == 0:
-    #     logger.error("During testing, no hyps is selected!")
-    #     return
-    # rouge = Rouge()
-    # scores_all = rouge.get_scores(tester.hyps, tester.refer, avg=True)
-    # logger.info('[INFO] End of valid | time: {:5.2f}s | valid loss {:5.4f} | ' .format((time.time() - iter_start_time), float(running_avg_loss)))
-    #
-    # res = "Rouge1:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-1']['p'], scores_all['rouge-1']['r'], scores_all['rouge-1']['f']) \
-    #       + "Rouge2:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-2']['p'], scores_all['rouge-2']['r'], scores_all['rouge-2']['f']) \
-    #       + "Rougel:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-l']['p'], scores_all['rouge-l']['r'], scores_all['rouge-l']['f'])
-    #
-    # logger.info(res)
-    #
-    # tester.getMetric()
-    #
-    # F = tester.labelMetric
-    #
-    # if best_loss is None or running_avg_loss < best_loss:
-    #     bestmodel_save_path = os.path.join(eval_dir, 'bestmodel_%d' % (save_no % 3))  # this is where checkpoints of best models are saved
-    #     if best_loss is not None:
-    #         logger.info(
-    #             '[INFO] Found new best model with %.6f running_avg_loss. The original loss is %.6f, Saving to %s',
-    #             float(running_avg_loss), float(best_loss), bestmodel_save_path)
-    #     else:
-    #         logger.info(
-    #             '[INFO] Found new best model with %.6f running_avg_loss. The original loss is None, Saving to %s',
-    #             float(running_avg_loss), bestmodel_save_path)
-    #     with open(bestmodel_save_path, 'wb') as f:
-    #         torch.save(model.state_dict(), f)
-    #     best_loss = running_avg_loss
-    #     non_descent_cnt = 0
-    #     save_no += 1
-    # else:
-    #     non_descent_cnt += 1
-    #
-    # if best_f is None or best_f < F:
-    #     bestmodel_save_path = os.path.join(eval_dir, 'bestFmodel')  # this is where checkpoints of best models are saved
-    #     if best_f is not None:
-    #         logger.info('[INFO] Found new best model with %.6f F. The original F is %.6f, Saving to %s', float(F),
-    #                     float(best_f), bestmodel_save_path)
-    #     else:
-    #         logger.info('[INFO] Found new best model with %.6f F. The original F is None, Saving to %s', float(F),
-    #                     bestmodel_save_path)
-    #     with open(bestmodel_save_path, 'wb') as f:
-    #         torch.save(model.state_dict(), f)
-    #     best_f = F
-    #
-    # return best_loss, best_f, non_descent_cnt, save_no
+    if len(tester.hyps) == 0 or len(tester.refer) == 0:
+        logger.error("During testing, no hyps is selected!")
+        return
+    rouge = Rouge()
+    scores_all = rouge.get_scores(tester.hyps, tester.refer, avg=True)
+    logger.info('[INFO] End of valid | time: {:5.2f}s | valid loss {:5.4f} | ' .format((time.time() - iter_start_time), float(running_avg_loss)))
+
+    res = "Rouge1:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-1']['p'], scores_all['rouge-1']['r'], scores_all['rouge-1']['f']) \
+          + "Rouge2:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-2']['p'], scores_all['rouge-2']['r'], scores_all['rouge-2']['f']) \
+          + "Rougel:\n\tp:%.6f, r:%.6f, f:%.6f\n" % (scores_all['rouge-l']['p'], scores_all['rouge-l']['r'], scores_all['rouge-l']['f'])
+
+    logger.info(res)
+
+    tester.getMetric()
+
+    F = tester.labelMetric
+
+    if best_loss is None or running_avg_loss < best_loss:
+        bestmodel_save_path = os.path.join(eval_dir, 'bestmodel_%d' % (save_no % 3))  # this is where checkpoints of best models are saved
+        if best_loss is not None:
+            logger.info(
+                '[INFO] Found new best model with %.6f running_avg_loss. The original loss is %.6f, Saving to %s',
+                float(running_avg_loss), float(best_loss), bestmodel_save_path)
+        else:
+            logger.info(
+                '[INFO] Found new best model with %.6f running_avg_loss. The original loss is None, Saving to %s',
+                float(running_avg_loss), bestmodel_save_path)
+        with open(bestmodel_save_path, 'wb') as f:
+            torch.save(model.state_dict(), f)
+        best_loss = running_avg_loss
+        non_descent_cnt = 0
+        save_no += 1
+    else:
+        non_descent_cnt += 1
+
+    if best_f is None or best_f < F:
+        bestmodel_save_path = os.path.join(eval_dir, 'bestFmodel')  # this is where checkpoints of best models are saved
+        if best_f is not None:
+            logger.info('[INFO] Found new best model with %.6f F. The original F is %.6f, Saving to %s', float(F),
+                        float(best_f), bestmodel_save_path)
+        else:
+            logger.info('[INFO] Found new best model with %.6f F. The original F is None, Saving to %s', float(F),
+                        bestmodel_save_path)
+        with open(bestmodel_save_path, 'wb') as f:
+            torch.save(model.state_dict(), f)
+        best_f = F
+
+    return best_loss, best_f, non_descent_cnt, save_no
 
 
 def main():
@@ -283,11 +280,11 @@ def main():
     parser.add_argument('--word_emb_dim', type=int, default=4, help='Word embedding size [default: 256],Glove dim is 300')
     parser.add_argument('--embed_train', action='store_true', default=False,help='whether to train Word embedding [default: False]')
     parser.add_argument('--n_head', type=int, default=1, help='multihead attention number [default: 8]')
-    parser.add_argument('--sent_max_len', type=int, default=2,help='max length of sentences (max source text sentence tokens)[default:100]')
-    parser.add_argument('--doc_max_timesteps', type=int, default=3,help='max length of documents (max timesteps of documents)[default:50]')
+    parser.add_argument('--sent_max_len', type=int, default=25,help='max length of sentences (max source text sentence tokens)[default:100]')
+    parser.add_argument('--doc_max_timesteps', type=int, default=20,help='max length of documents (max timesteps of documents)[default:50]')
 
     # Training
-    parser.add_argument('--lr', type=float, default=0.0005, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
     parser.add_argument('--lr_descent', action='store_true', default=True, help='learning rate descent')
     parser.add_argument('--grad_clip', action='store_true', default=True, help='for gradient clipping')
     parser.add_argument('--max_grad_norm', type=float, default=1.0, help='for gradient clipping max gradient normalization')

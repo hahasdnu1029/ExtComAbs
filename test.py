@@ -19,6 +19,7 @@
 import torch
 
 import torch.nn as nn
+import torch.nn.functional as F
 
 loss = nn.CrossEntropyLoss()
 # # input is of size nBatch x nClasses = 3 x 5
@@ -26,10 +27,13 @@ loss = nn.CrossEntropyLoss()
 # # each element in target has to have 0 <= value < nclasses
 # target = torch.autograd.Variable(torch.LongTensor([[1, 0, 4,1,1],[1, 0, 4,1,1],[1, 0, 4,1,1]]))
 # output = loss(input, target)
-
-a = torch.randn(3,4)
-print(a.dtype)
+a = torch.randn(3,1)
 print(a)
-print((a[0][0]).data)
+a = F.sigmoid(a)
+print(a)
+bce = nn.BCELoss(reduction="none")
+b = torch.tensor([1.0,0.0,1.0])
+loss = bce(a,b)
+print(loss)
 
 

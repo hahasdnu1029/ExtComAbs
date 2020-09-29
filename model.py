@@ -16,6 +16,7 @@
 # limitations under the License.
 # ==============================================================================
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import math
 
@@ -59,15 +60,11 @@ class MyModel(nn.Module):
         self.transformer = nn.Transformer(d_model=self.hidden, nhead=self.nhead, num_encoder_layers=nlayers,
                                           num_decoder_layers=nlayers, dim_feedforward=self.hidden, dropout=dropout, activation="gelu")
 
-        self.transformerEncoderLayer = nn.TransformerEncoderLayer(d_model=self.hidden, nhead = self.nhead, dim_feedforward=self.hidden, dropout=0.1, activation="gelu")
-
-        self.transformerEncoder = nn.TransformerEncoder(self.transformerEncoderLayer, num_layers=6)
-
         self.src_mask = None  # 输入序列的mask
         self.trg_mask = None  # 输出序列的mask
         self.memory_mask = None # encoder输出序列的mask
 
-        self.fc_out_tran = nn.Linear(self.hidden, self.outputSize)
+        self.fc_out = nn.Linear(self.hidden, 2)
 
     def generate_square_subsequent_mask(self, sz):
         """
@@ -114,7 +111,9 @@ class MyModel(nn.Module):
                                       src_key_padding_mask=src_pad_mask, tgt_key_padding_mask=trg_pad_mask,
                                       memory_key_padding_mask=src_pad_mask).transpose(1, 0)
 
-            output = self.fc_out_tran(gen_document)
+            gen_document = torch.sum(gen_document, dim=1)/(self.sent_max_len*self.doc_max_timesteps)
+            output = self.fc_out(gen_document)
             outputs.append(output)
+            print(F.softmax(output, dim=1))
 
-        return outputs
+        return torch.cat(outputs, dim=0).reshape(source.shape[0], source.shape[1], 2)
