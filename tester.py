@@ -28,14 +28,15 @@ from tools.logger import *
 
 
 class TestPipLine():
-    def __init__(self, model, m, test_dir, limited):
+    def __init__(self, model_gen, model_class, m, test_dir, limited):
         """
             :param model: the model
             :param m: the number of sentence to select
             :param test_dir: for saving decode files
             :param limited: for limited Recall evaluation
         """
-        self.model = model
+        self.model_gen = model_gen
+        self.model_class = model_class
         self.limited = limited
         self.m = m
         self.test_dir = test_dir
@@ -100,8 +101,8 @@ class TestPipLine():
 
 
 class SLTester(TestPipLine):
-    def __init__(self, model, m, test_dir=None, limited=False, blocking_win=3):
-        super().__init__(model, m, test_dir, limited)
+    def __init__(self, model_gen, model_class, m, test_dir=None, limited=False, blocking_win=3):
+        super().__init__(model_gen, model_class, m, test_dir, limited)
         self.pred, self.true, self.match, self.match_true = 0, 0, 0, 0
         self._F = 0
         self.criterion = torch.nn.CrossEntropyLoss()
@@ -119,7 +120,7 @@ class SLTester(TestPipLine):
         """
         self.batch_number += 1
 
-        outputs = self.model.forward(features_in, features_out)
+        outputs = self.model_class.forward(self.model_gen, features_in, features_out)
 
         loss_outputs = torch.transpose(outputs, 2, 1)
 
@@ -145,9 +146,8 @@ class SLTester(TestPipLine):
                                                min(self.m, sent_max_number))
             else:
                 topk, pred_idx = torch.topk(softmax_value, min(self.m, sent_max_number))
-
-            print(topk)
-            print(pred_idx)
+                print(topk)
+                print(pred_idx)
 
             prediction = torch.zeros(sent_max_number).long()
             prediction[pred_idx] = 1

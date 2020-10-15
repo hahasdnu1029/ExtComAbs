@@ -40,10 +40,10 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
-class MyModel(nn.Module):
+class GengrateDocument(nn.Module):
 
     def __init__(self, args, embed, nlayers=3, dropout=0.1):
-        super(MyModel, self).__init__()
+        super(GengrateDocument, self).__init__()
 
         self.cuda = args.cuda
         self.nhead = args.n_head  # 多头注意力模型的头数
@@ -64,7 +64,7 @@ class MyModel(nn.Module):
         self.trg_mask = None  # 输出序列的mask
         self.memory_mask = None # encoder输出序列的mask
 
-        self.fc_out = nn.Linear(self.hidden, 2)
+        self.fc_out = nn.Linear(self.hidden, self.outputSize)
 
     def generate_square_subsequent_mask(self, sz):
         """
@@ -111,9 +111,34 @@ class MyModel(nn.Module):
                                       src_key_padding_mask=src_pad_mask, tgt_key_padding_mask=trg_pad_mask,
                                       memory_key_padding_mask=src_pad_mask).transpose(1, 0)
 
-            gen_document = torch.sum(gen_document, dim=1)/(self.sent_max_len*self.doc_max_timesteps)
             output = self.fc_out(gen_document)
             outputs.append(output)
-            print(F.softmax(output, dim=1))
+
+        return outputs
+
+
+class Classfiler(nn.Module):
+
+    def __init__(self, args, embed):
+        super(Classfiler, self).__init__()
+        self.hidden = args.word_emb_dim  # 编码器和解码器输入的大小
+        self.doc_max_timesteps = args.doc_max_timesteps # 输入文档的最大句子数目
+        self.outputSize = args.vocab_size  # 词汇表大小(用于预测每个单词输出的概率)
+        self.sent_max_len = args.sent_max_len  # 输入句子的最大长度
+        self.fc_out = nn.Linear(self.outputSize, 2)
+
+    def forward(self, model_gen, source, target):
+        gen_documents = []
+        for i in range(source.shape[0]):
+            source1 = source[i].unsqueeze(dim=0)
+            target1 = target[i].unsqueeze(dim=0)
+            gen_document = model_gen(source1,target1)
+            gen_documents.append(gen_document)
+        outputs = []
+        for j in range(len(gen_documents)):
+            for k in range(len(gen_documents[j])):
+                document = torch.sum(gen_documents[j][k], dim=1) / (self.sent_max_len * self.doc_max_timesteps)
+                output = self.fc_out(document)
+                outputs.append(output)
 
         return torch.cat(outputs, dim=0).reshape(source.shape[0], source.shape[1], 2)

@@ -27,13 +27,9 @@ loss = nn.CrossEntropyLoss()
 # # each element in target has to have 0 <= value < nclasses
 # target = torch.autograd.Variable(torch.LongTensor([[1, 0, 4,1,1],[1, 0, 4,1,1],[1, 0, 4,1,1]]))
 # output = loss(input, target)
-a = torch.randn(3,1)
+a = torch.randn(1,2,3)
 print(a)
-a = F.sigmoid(a)
-print(a)
-bce = nn.BCELoss(reduction="none")
-b = torch.tensor([1.0,0.0,1.0])
-loss = bce(a,b)
-print(loss)
+b = torch.sum(a,dim=2)
+print(b)
 
 
